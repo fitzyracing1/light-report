@@ -10,5 +10,5 @@
   "main": "lib/lights.mjs",
   "files": ["bin", "lib", "server.mjs", "README.md", "LICENSE"],
   "engines": { "node": ">=18" },
-  "scripts": { "start": "node server.mjs", "test": "node --test test/" }
+  "scripts": { "start": "node server.mjs", "test": "node --test test/lights.test.mjs test/server.test.mjs" }
 }
