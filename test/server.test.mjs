@@ -37,7 +37,11 @@ test('first report creates light and returns token once; token required after', 
   const svg = await fetch(base + '/lights/build/badge.svg');
   assert.match(svg.headers.get('content-type'), /svg/);
   assert.match(await svg.text(), /dark/);
-  assert.match(await (await fetch(base + '/')).text(), /build/);
+  const home = await (await fetch(base + '/')).text();
+  for (const id of ['lights', 'ways', 'quickstart', 'report', 'run', 'light-file', 'badge', 'api', 'detect', 'limits', 'faq']) assert.match(home, new RegExp(`id="${id}"`));
+  assert.match(home, /build/);
+  assert.doesNotMatch(home, /\b(green|red|pass|passed|fail|failed|failure)\b/i);
+  assert.match(await (await fetch(base + '/board')).text(), /build/);
 });
 test('unknown light is dark and stale', async () => {
   const g = await (await fetch(base + '/lights/never')).json();

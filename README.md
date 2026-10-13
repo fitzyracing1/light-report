@@ -1,173 +1,135 @@
-# light-report
+# ● light-report
 
-Report a CI **light** from anywhere — a shell script, cron, Jenkins, GitLab, a health check, or GitHub — and read it back as JSON, a one-word file, or a badge. It can also **run** a public repo's tests for you and turn the result into a light.
+**One lit / dark light for any build, test or check.** Report the exit code of anything — a shell script, cron, Jenkins, GitLab, a health check — or let light-report run a public repo's tests for you. Read it back as JSON, a one-word file, or a badge.
 
-A light is one bit, active-low, same rule as [fitzyracing1/lit-dark](https://github.com/fitzyracing1/lit-dark/blob/main/SPEC.md):
+[![light-report light](https://light-report-production.up.railway.app/lights/fitzyracing1--light-report/badge.svg)](https://light-report-production.up.railway.app/lights/fitzyracing1--light-report)
+[![ci](https://github.com/fitzyracing1/light-report/actions/workflows/ci.yml/badge.svg)](https://github.com/fitzyracing1/light-report/actions/workflows/ci.yml)
+
+**Website and full guide: https://light-report-production.up.railway.app** · Live board: [https://light-report-production.up.railway.app/board](https://light-report-production.up.railway.app/board)
+
+## 30-second quickstart
+
+You need Node 18+. Nothing to install.
+
+```bash
+# 1. Have the server run a public repo's tests (streams the log, exits 0 lit / 1 dark)
+npx -y -p github:fitzyracing1/light-report light-check owner/repo
+
+# 2. Report your own command from anywhere (exits with your command's exit code)
+npx -y -p github:fitzyracing1/light-report light-run my-job -- ./my-job.sh
+
+# 3. Read it back
+curl -s https://light-report-production.up.railway.app/lights/my-job/LIGHT        # lit or dark
+```
+
+## Lit and dark
 
 | light | bit | when |
 |---|---|---|
 | **lit** ● | `0` | exit code 0, `state: "lit"`, or GitHub conclusion `success` |
-| **dark** ○ | `1` | anything else: nonzero exit, cancelled, timed out, or no report within the TTL (stale) |
+| **dark** ○ | `1` | anything else — nonzero exit, cancelled, timeout — or **no report within the TTL** (stale) |
 
-No dependencies. Node 18+.
+Active-low, exactly as in the [lit-dark spec](https://github.com/fitzyracing1/lit-dark/blob/main/SPEC.md). More: [site → lit & dark](https://light-report-production.up.railway.app/#lights).
 
-Live instance: https://light-report-production.up.railway.app (the default for `light-run` when `LIGHT_REPORT_URL` is unset). Example badges: ![demo-lit](https://light-report-production.up.railway.app/lights/demo-lit/badge.svg) ![demo-dark](https://light-report-production.up.railway.app/lights/demo-dark/badge.svg)
+## Two ways to use it
 
-## Report a light
+1. **Report from anywhere** — wrap a command with `light-run` or send one `curl`. → [site → report](https://light-report-production.up.railway.app/#report)
+2. **Let the server run your repo** — `light-check owner/repo`. → [site → run](https://light-report-production.up.railway.app/#run)
 
-### With `light-run` (wraps any command)
+## Step by step
 
-```bash
-export LIGHT_REPORT_URL=https://YOUR-HOST          # your light-report server
-npx -y -p github:fitzyracing1/light-report light-run nightly-backup -- ./backup.sh
-```
-
-`light-run` runs the command, reports its exit code (0 → lit, anything else → dark), and exits with the **same** exit code, so it fits inside any script or CI step.
-
-The first report for a new name creates the light and prints a **write token once**. Keep it; later reports need it:
+### Check a repo with the runner
 
 ```bash
-export LIGHT_TOKEN_NIGHTLY_BACKUP=lr_...   # or LIGHT_TOKEN=lr_...
+npx -y -p github:fitzyracing1/light-report light-check owner/repo
+npx -y -p github:fitzyracing1/light-report light-check owner/repo --ref v1.2.0 --cmd 'npm ci && npm test'
 ```
 
-### With curl (any shell, cron, Jenkins, GitLab)
+Shows `◌ running…`, the live log, then `● lit` or `○ dark`. Exit 0 = lit, 1 = dark, 2 = the run could not start (not a light). The result becomes the light `owner--repo`.
+
+### Read a repo's GitHub light
 
 ```bash
-./deploy.sh; curl -fsS -X POST "$LIGHT_REPORT_URL/lights/deploy" \
-  -H "Authorization: Bearer $LIGHT_TOKEN" -H 'Content-Type: application/json' \
-  -d "{\"exitCode\": $?, \"source\": \"shell\"}"
+npx -y -p github:fitzyracing1/light-report light-check owner/repo --github
 ```
 
-**cron**
+### Report with light-run (shell, cron, CI)
 
-```cron
-0 3 * * * /opt/backup.sh; curl -fsS -X POST https://YOUR-HOST/lights/backup -H "Authorization: Bearer lr_..." -H 'Content-Type: application/json' -d "{\"exitCode\": $?, \"source\": \"cron\"}"
+```bash
+npx -y -p github:fitzyracing1/light-report light-run deploy -- ./deploy.sh
+# first report prints a write token ONCE — keep it:
+export LIGHT_TOKEN_DEPLOY=lr_...
 ```
 
-**Jenkins** (declarative pipeline)
-
-```groovy
-post {
-  success { sh 'curl -fsS -X POST $LIGHT_REPORT_URL/lights/$JOB_NAME -H "Authorization: Bearer $LIGHT_TOKEN" -H "Content-Type: application/json" -d \'{"state":"lit","source":"jenkins"}\'' }
-  unsuccessful { sh 'curl -fsS -X POST $LIGHT_REPORT_URL/lights/$JOB_NAME -H "Authorization: Bearer $LIGHT_TOKEN" -H "Content-Type: application/json" -d \'{"state":"dark","source":"jenkins"}\'' }
-}
-```
-
-**GitLab CI**
+`LIGHT_REPORT_URL` picks the server (default `https://light-report-production.up.railway.app`). GitLab:
 
 ```yaml
 test:
   script:
     - npx -y -p github:fitzyracing1/light-report light-run $CI_PROJECT_NAME -- npm test
-  variables:
-    LIGHT_REPORT_URL: https://YOUR-HOST   # put LIGHT_TOKEN in masked CI/CD variables
 ```
 
-**Health check** (every 5 minutes; set `LIGHT_TTL_SECONDS` so a silent checker goes dark)
+### Report with curl (cron, Jenkins, health checks)
 
 ```bash
-curl -fsS https://example.com/health >/dev/null; curl -fsS -X POST $LIGHT_REPORT_URL/lights/example-health -H "Authorization: Bearer $LIGHT_TOKEN" -H 'Content-Type: application/json' -d "{\"exitCode\": $?, \"source\": \"healthcheck\"}"
+./backup.sh; curl -fsS -X POST https://light-report-production.up.railway.app/lights/backup \
+  -H "Authorization: Bearer $LIGHT_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"exitCode\": $?, \"source\": \"cron\"}"
 ```
 
-### From GitHub (optional adapter)
+Jenkins and health-check versions: [site → report](https://light-report-production.up.railway.app/#report).
 
-GitHub is just one more source. The server reads the newest completed push run and maps it once: `success` → lit, anything else → dark.
-
-```bash
-curl -fsS -X POST $LIGHT_REPORT_URL/lights/lit-dark/github -H "Authorization: Bearer $LIGHT_TOKEN" \
-  -H 'Content-Type: application/json' -d '{"repo":"fitzyracing1/lit-dark"}'
-```
-
-If GitHub can't be reached or has no run, that is an error (HTTP 502), not a dark light — as in the spec.
-
-## Run tests for a public repo (the runner)
-
-```bash
-npx -y -p github:fitzyracing1/light-report light-check fitzyracing1/light-report
-npx -y -p github:fitzyracing1/light-report light-check owner/repo --ref v1.2.0 --cmd 'make check'
-npx -y -p github:fitzyracing1/light-report light-check owner/repo --github   # just read the GitHub light
-```
-
-`light-check` queues a run, streams the log live, shows `◌ running…` and then `● lit` or `○ dark`, and exits **0 for lit, 1 for dark** (2 if the run could not be submitted — that is not a light). The result is also saved as a light named `owner--repo` with source `light-report-runner`, so it shows on the board and as a badge: `/lights/owner--repo/badge.svg`.
-
-Raw HTTP:
-
-```bash
-curl -s -X POST $LIGHT_REPORT_URL/runs -H 'Content-Type: application/json' -d '{"repo":"owner/repo","ref":"main","command":"npm test"}'
-# → {"id":"9f2c…","status":"queued",…}
-curl -N $LIGHT_REPORT_URL/runs/9f2c…/log     # live log (chunked text) until the run ends
-curl -s $LIGHT_REPORT_URL/runs/9f2c…         # {"status":"done","light":"lit","bit":0,"exitCode":0,"seconds":12.3,…}
-curl -s $LIGHT_REPORT_URL/runs               # recent runs
-```
-
-`ref` and `command` are optional. `ref` must be a branch or tag (the clone is `git clone --depth 1 --branch <ref>`; commit SHAs are not supported).
-
-### What command runs
-
-If you don't give a `command`, the runner looks in this order:
-
-1. A **light file** — `light.yml`, `light.yaml` or `.light` in the repo root (format below).
-2. `package.json` with a `test` script → `npm ci` (if there is a lockfile, else `npm install`) then `npm test`.
-3. `Cargo.toml` → `cargo test` — only if the runner has a Rust toolchain. The hosted runner does not, so these repos read dark with "no Rust toolchain".
-4. `pyproject.toml` / `setup.py` / `requirements.txt` → a fresh venv, `pip install` the requirements and the project, then `pytest`.
-5. A `Makefile` with a `test:` target → `make test`.
-
-Nothing found → dark, with the reason in the log.
-
-### Light file format
-
-One shell command per `run:` line, run in order from the repo root; the first command that exits nonzero stops the run and makes the light dark. `#` starts a comment, other lines are ignored (so a light file can sit next to YAML you already have).
+### Add a light.yml
 
 ```yaml
-# light.yml
+# light.yml — one shell command per run: line, in order; first nonzero exit = dark
 run: npm ci
-run: npm run lint
 run: npm test
 ```
 
-### Limits and safety — read this
+→ [site → light.yml](https://light-report-production.up.railway.app/#light-file)
 
-This is a convenience runner, **not a full sandbox**. Only point it at code you would be willing to run on a small shared box.
+### Add a badge
 
-- **Public GitHub repos only.** Clones are anonymous over HTTPS; private repos simply don't clone.
-- Jobs run as an **unprivileged user** (uid 1000) in a fresh temp directory that is **wiped** afterwards.
-- The job's environment is built from scratch (`PATH`, `HOME`, `LANG`, `CI=true`): no Railway variables, tokens or other server secrets reach the job. The light store is not readable by the job.
-- **Hard timeout** of 10 minutes (`RUN_TIMEOUT_SECONDS`); the whole process group is killed and the light is dark.
-- **One job at a time** (`RUN_CONCURRENCY`), up to 10 waiting (`RUN_MAX_QUEUE`), **6 runs per hour per IP** (`RUNS_PER_IP_PER_HOUR`).
-- Logs are capped at **1 MB** (`RUN_LOG_BYTES`) and kept in memory for the last 100 runs; they are gone after a restart (the lights stay).
-- Jobs share the container's kernel, CPU, memory and network — there is no network isolation and no per-job memory limit. Toolchains available: Node 22/npm, Python 3, git, make. No Rust, Go, Java or Docker.
-- Anyone can start a run for any public repo, so the runner can overwrite a light named `owner--repo`. Use other names for lights you report yourself.
+```markdown
+[![light](https://light-report-production.up.railway.app/lights/owner--repo/badge.svg)](https://light-report-production.up.railway.app/lights/owner--repo)
+```
 
-## Read a light
+### Read a LIGHT file
 
-| URL | gives |
+```bash
+curl -s https://light-report-production.up.railway.app/lights/deploy/LIGHT     # lit or dark
+curl -s https://light-report-production.up.railway.app/lights/deploy           # {"name","light","bit","source","reportedAt","stale"}
+```
+
+## API
+
+| | |
 |---|---|
-| `GET /lights/:name` | `{"name","light":"lit"\|"dark","bit":0\|1,"source","detail","reportedAt","stale"}` |
-| `GET /lights/:name/LIGHT` | plain `lit` or `dark` |
-| `GET /lights/:name/badge.svg` | badge: `![light](https://YOUR-HOST/lights/NAME/badge.svg)` |
-| `GET /lights` | every light as JSON |
-| `GET /` | a board of all lights |
+| `POST /lights/:name` | `{exitCode}` or `{state}`, `source`, `detail?`; Bearer token after the first report |
+| `POST /lights/:name/github` | `{repo}` — GitHub as a source |
+| `GET /lights/:name` · `/LIGHT` · `/badge.svg` | JSON · one word · badge |
+| `GET /lights` · `GET /board` | all lights as JSON · HTML board |
+| `POST /runs` | `{repo, ref?, command?}` — queue a run |
+| `GET /runs/:id` · `/runs/:id/log` · `GET /runs` | status · live log · recent runs |
 
-A name nobody has reported yet reads as dark and stale.
+Full table: [site → API](https://light-report-production.up.railway.app/#api). Auto-detection order (light.yml → npm → cargo → python → make): [site → detection](https://light-report-production.up.railway.app/#detect).
 
-## Report body
+## Limits and safety
 
-`POST /lights/:name` with JSON `{"exitCode": 0}` **or** `{"state": "lit"|"dark"}` (GitHub conclusions like `"success"` are accepted), plus `source` and optional `detail`. Token goes in `Authorization: Bearer <token>` (or `X-Light-Token`). Tokens are stored only as SHA-256 hashes.
+The runner is **not a full sandbox** — public GitHub repos only; jobs run as an unprivileged user in a wiped temp dir with a clean environment, but share the container's network, CPU and memory. 10-minute cap, one job at a time, 6 runs per hour per IP, logs kept in memory only. Anyone can run any public repo, which writes its `owner--repo` light. Details: [site → limits](https://light-report-production.up.railway.app/#limits).
+
+## Is this replacing GitHub Actions?
+
+No — it's a small runner plus a scoreboard. GitHub is one optional source. [FAQ](https://light-report-production.up.railway.app/#faq)
 
 ## Run your own
 
 ```bash
-node server.mjs                  # PORT=8080, lights kept in memory
-DATA_DIR=./data node server.mjs  # lights saved to ./data/lights.json
+DATA_DIR=./data node server.mjs     # no dependencies; Dockerfile included
 ```
 
-| env | default | |
-|---|---|---|
-| `PORT` | `8080` | |
-| `DATA_DIR` | `RAILWAY_VOLUME_MOUNT_PATH` | where `lights.json` lives; unset = memory only |
-| `LIGHT_TTL_SECONDS` | `86400` | no report for this long → dark (stale); `0` = never stale |
-
-**Railway:** create a project and service, add a volume mounted at `/data`, set `RAILWAY_RUN_UID=0`, generate a domain (target port 8080), then `railway up` (a project token in `RAILWAY_TOKEN` works for `railway up --ci --service <id>`). The `Dockerfile` sets `DATA_DIR=/data`.
+Env: `PORT`, `DATA_DIR`, `LIGHT_TTL_SECONDS` (86400), `RUN_TIMEOUT_SECONDS` (600), `RUN_CONCURRENCY` (1), `RUN_MAX_QUEUE` (10), `RUNS_PER_IP_PER_HOUR` (6), `RUN_LOG_BYTES` (1000000), `RUN_AS_UID`/`RUN_AS_GID`, `PUBLIC_URL`.
 
 ## License
 

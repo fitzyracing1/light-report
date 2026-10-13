@@ -2,6 +2,8 @@ name: ci
 on:
   push:
   pull_request:
+  schedule:
+    - cron: '17 6 * * *'   # daily, so this repo's own runner light never goes stale
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -14,3 +16,10 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: npm test
+  light:
+    # ask the live light-report runner to check this repo; it does not wait or change this job's light
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS -X POST https://light-report-production.up.railway.app/runs -H 'Content-Type: application/json' -d '{"repo":"${{ github.repository }}"}' || echo "runner did not take the job (busy or rate limited)"

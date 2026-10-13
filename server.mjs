@@ -6,6 +6,7 @@ import { NAME_RE, toLight, toBit, newToken, hashToken, tokenMatches, view, badge
 import { openStore } from './lib/store.mjs';
 import { readGitHubLight } from './lib/github.mjs';
 import { createRunner } from './lib/runner.mjs';
+import { siteHtml } from './lib/site.mjs';
 
 export function createApp({
   dataDir = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH,
@@ -103,14 +104,19 @@ export function createApp({
 <style>body{font:15px system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}table{border-collapse:collapse;width:100%}td,th{padding:.4em;border-bottom:1px solid #ddd;text-align:left}.lamp{font-size:1.4em}.lit .lamp{color:#f2b705}.dark .lamp{color:#333}</style></head>
 <body><h1>light-report</h1><p>Each light is one bit: <b>lit</b> = 0, <b>dark</b> = 1. No report within ${ttlSeconds}s means dark.</p>
 <table><tr><th></th><th>name</th><th>light</th><th>bit</th><th>source</th><th>reported</th></tr>${tr || '<tr><td colspan="6">No lights reported yet.</td></tr>'}</table>
-<p>Recent runs: <a href="/runs">/runs</a> · github.com/fitzyracing1/light-report</a></p></body></html>`;
+<p><a href="/">Guide</a> · recent runs: <a href="/runs">/runs</a> · <a href="https://github.com/fitzyracing1/light-report">github.com/fitzyracing1/light-report</a></p></body></html>`;
   }
 
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://x');
       const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
-      if (req.method === 'GET' && parts.length === 0) return send(res, 200, board(), 'text/html; charset=utf-8');
+      if (req.method === 'GET' && parts.length === 0) {
+        const base = process.env.PUBLIC_URL || 'https://light-report-production.up.railway.app';
+        const lights = Object.keys(store.all()).sort().map((n) => view(n, store.get(n), ttlMs));
+        return send(res, 200, siteHtml({ base, ttlSeconds, lights }), 'text/html; charset=utf-8');
+      }
+      if (req.method === 'GET' && url.pathname === '/board') return send(res, 200, board(), 'text/html; charset=utf-8');
       if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true, persistent: store.persistent(), ttlSeconds });
       if (req.method === 'GET' && url.pathname === '/lights') {
         return send(res, 200, Object.keys(store.all()).sort().map((n) => view(n, store.get(n), ttlMs)));
