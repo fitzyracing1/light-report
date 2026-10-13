@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // light-report — report CI lights from any source. lit = 0, dark = 1 (active-low).
 import { createServer } from 'node:http';
+import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { NAME_RE, toLight, toBit, newToken, hashToken, tokenMatches, view, badgeSvg } from './lib/lights.mjs';
 import { openStore } from './lib/store.mjs';
@@ -23,12 +24,12 @@ export function createApp({
   const runner = createRunner({
     ...runnerOptions,
     onResult(run) {
-      const name = run.repo.replace('/', '--');
+      const name = run.lightName;
       const existing = store.get(name);
       store.set(name, {
         tokenHash: existing?.tokenHash ?? null,
         light: run.light,
-        source: 'light-report-runner',
+        source: run.upload ? 'light-report-runner (upload)' : 'light-report-runner',
         detail: `run ${run.id}: ${run.command || run.error || ''} → exit ${run.exitCode}${run.timedOut ? ' (timeout)' : ''}`.slice(0, 500),
         reportedAt: run.finishedAt,
       });
@@ -126,6 +127,22 @@ export function createApp({
           const body = await readBody(req);
           if (!allowRun(req)) return send(res, 429, { error: `rate limit: ${runsPerHour} runs per hour per IP` });
           const run = runner.submit(body);
+          return send(res, 202, { ...runner.view(run), url: `/runs/${run.id}`, log: `/runs/${run.id}/log` });
+        }
+        if (req.method === 'POST' && parts.length === 2 && parts[1] === 'upload') {
+          // body: gzip(JSON {name, command?, files:[{path, mode, data(base64)}]}), max 25 MB on the wire
+          const chunks = []; let size = 0;
+          for await (const c of req) { size += c.length; if (size > 25 * 1024 * 1024) return send(res, 413, { error: 'upload over 25 MB' }); chunks.push(c); }
+          let body;
+          try {
+            const raw = Buffer.concat(chunks);
+            const json = raw[0] === 0x1f && raw[1] === 0x8b ? gunzipSync(raw, { maxOutputLength: 40 * 1024 * 1024 }) : raw;
+            body = JSON.parse(json.toString('utf8'));
+          } catch (e) { return send(res, 400, { error: `upload must be gzip'd JSON: ${e.message}` }); }
+          const bytes = (body.files || []).reduce((n, f) => n + Math.floor(String(f.data || '').length * 3 / 4), 0);
+          if (bytes > 20 * 1024 * 1024) return send(res, 413, { error: 'upload over 20 MB of files' });
+          if (!allowRun(req)) return send(res, 429, { error: `rate limit: ${runsPerHour} runs per hour per IP` });
+          const run = runner.submit({ files: body.files, name: body.name, command: body.command || undefined });
           return send(res, 202, { ...runner.view(run), url: `/runs/${run.id}`, log: `/runs/${run.id}/log` });
         }
         if (req.method === 'GET' && parts.length === 1) return send(res, 200, runner.list());

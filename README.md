@@ -22,6 +22,34 @@ npx -y -p github:fitzyracing1/light-report light-run my-job -- ./my-job.sh
 curl -s https://light-report-production.up.railway.app/lights/my-job/LIGHT        # lit or dark
 ```
 
+## For AI agents (Claude Code, VS Code / Copilot, Cursor)
+
+Make the agent run the light itself before anything goes to GitHub, and keep fixing while it's dark:
+
+```bash
+cd your-repo
+npx -y -p github:fitzyracing1/light-report light-check init              # Claude Code Stop hook, VS Code task + Copilot instructions, Cursor rule, AGENTS.md
+npx -y -p github:fitzyracing1/light-report light-check init --pre-push   # also a git pre-push hook that blocks the push while dark
+```
+
+| tool | what `init` writes | how it works |
+|---|---|---|
+| Claude Code | `.claude/settings.json` Stop hook, `CLAUDE.md` block | runs the tests when Claude finishes; dark → `{"decision":"block"}` with the log, Claude keeps fixing (gives up after 8 rounds) |
+| VS Code / Copilot | `.vscode/tasks.json` task `light-check`, `.github/copilot-instructions.md` block | Copilot agent is told to run `light-check . --local` before it's done |
+| Cursor | `.cursor/rules/light-check.mdc` (alwaysApply), `AGENTS.md` block | same instruction for Cursor's agent |
+| git | `.git/hooks/pre-push` (with `--pre-push`) | dark → push blocked (`--no-verify` skips once) |
+
+Merges into existing files, never overwrites them; running it twice changes nothing. Optional: `--post-edit` (Claude PostToolUse hook on edits), `--folder-open` (VS Code task on folder open).
+
+Check a local folder yourself:
+
+```bash
+npx -y -p github:fitzyracing1/light-report light-check . --local   # run here, nothing uploaded, report light local--<folder>
+npx -y -p github:fitzyracing1/light-report light-check .           # upload the working tree (respects .gitignore; never .git, node_modules, .env*, keys; max 20 MB)
+```
+
+Full steps: [site → AI agents](https://light-report-production.up.railway.app/#agents).
+
 ## Lit and dark
 
 | light | bit | when |
@@ -111,6 +139,7 @@ curl -s https://light-report-production.up.railway.app/lights/deploy           #
 | `GET /lights/:name` · `/LIGHT` · `/badge.svg` | JSON · one word · badge |
 | `GET /lights` · `GET /board` | all lights as JSON · HTML board |
 | `POST /runs` | `{repo, ref?, command?}` — queue a run |
+| `POST /runs/upload` | gzip'd JSON `{name, command?, files}` — run an uploaded folder |
 | `GET /runs/:id` · `/runs/:id/log` · `GET /runs` | status · live log · recent runs |
 
 Full table: [site → API](https://light-report-production.up.railway.app/#api). Auto-detection order (light.yml → npm → cargo → python → make): [site → detection](https://light-report-production.up.railway.app/#detect).

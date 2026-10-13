@@ -23,6 +23,6 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test test/lights.test.mjs test/server.test.mjs test/runner.test.mjs"
+    "test": "node --test test/lights.test.mjs test/server.test.mjs test/runner.test.mjs test/agents.test.mjs"
   }
 }

@@ -1,3 +1,4 @@
+process.env.LIGHT_REPORT_CONFIG_DIR ||= (await import('node:fs')).mkdtempSync((await import('node:path')).join((await import('node:os')).tmpdir(), 'lr-cfg-'));
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
@@ -38,7 +39,7 @@ test('first report creates light and returns token once; token required after', 
   assert.match(svg.headers.get('content-type'), /svg/);
   assert.match(await svg.text(), /dark/);
   const home = await (await fetch(base + '/')).text();
-  for (const id of ['lights', 'ways', 'quickstart', 'report', 'run', 'light-file', 'badge', 'api', 'detect', 'limits', 'faq']) assert.match(home, new RegExp(`id="${id}"`));
+  for (const id of ['lights', 'ways', 'quickstart', 'report', 'run', 'agents', 'light-file', 'badge', 'api', 'detect', 'limits', 'faq']) assert.match(home, new RegExp(`id="${id}"`));
   assert.match(home, /build/);
   assert.doesNotMatch(home, /\b(green|red|pass|passed|fail|failed|failure)\b/i);
   assert.match(await (await fetch(base + '/board')).text(), /build/);

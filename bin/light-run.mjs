@@ -6,6 +6,7 @@
 //   LIGHT_SOURCE       source label (default "light-run@<hostname>")
 import { spawn } from 'node:child_process';
 import { hostname } from 'node:os';
+import { loadToken, saveToken } from '../lib/local.mjs';
 
 const args = process.argv.slice(2);
 const sep = args.indexOf('--');
@@ -17,7 +18,7 @@ if (!name || name === '--' || sep !== 1 || cmd.length === 0) {
 }
 const base = (process.env.LIGHT_REPORT_URL || 'https://light-report-production.up.railway.app').replace(/\/+$/, '');
 const envKey = 'LIGHT_TOKEN_' + name.toUpperCase().replace(/[^A-Z0-9]/g, '_');
-const token = process.env[envKey] || process.env.LIGHT_TOKEN;
+const token = process.env[envKey] || process.env.LIGHT_TOKEN || loadToken(base, name);
 const started = Date.now();
 
 const child = spawn(cmd[0], cmd.slice(1), { stdio: 'inherit', shell: cmd.length === 1 });
@@ -36,7 +37,8 @@ const finish = async (code, why) => {
     if (!res.ok) console.error(`light-run: report not accepted: HTTP ${res.status} ${body.error || ''}`);
     else {
       console.error(`light-run: ${name} ${body.light === 'lit' ? '●' : '○'} ${body.light} (bit ${body.bit}) → ${base}/lights/${name}`);
-      if (body.token) console.error(`light-run: new write token for "${name}" (shown once, keep it): ${body.token}\n  export ${envKey}=${body.token}`);
+      if (body.token) { try { saveToken(base, name, body.token); } catch {} }
+      if (body.token) console.error(`light-run: new write token for "${name}" (shown once; also saved to ~/.config/light-report/tokens.json): ${body.token}\n  export ${envKey}=${body.token}`);
     }
   } catch (e) {
     console.error(`light-run: could not reach ${base}: ${e.message}`);
