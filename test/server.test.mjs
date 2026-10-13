@@ -58,7 +58,7 @@ test('persists across restart', async () => {
   s2.close();
   assert.equal(g.light, 'lit');
 });
-test('light-run reports exit code and passes it through', async () => {
+test('light-run reports the exit code and exits with it', async () => {
   const bin = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'light-run.mjs');
   const run = (name, code) => new Promise((resolve) => {
     import('node:child_process').then(({ spawn }) => {
