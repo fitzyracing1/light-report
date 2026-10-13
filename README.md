@@ -11,6 +11,8 @@ A light is one bit, active-low, same rule as [fitzyracing1/lit-dark](https://git
 
 No dependencies. Node 18+.
 
+Live instance: https://light-report-production.up.railway.app (the default for `light-run` when `LIGHT_REPORT_URL` is unset). Example badges: ![demo-lit](https://light-report-production.up.railway.app/lights/demo-lit/badge.svg) ![demo-dark](https://light-report-production.up.railway.app/lights/demo-dark/badge.svg)
+
 ## Report a light
 
 ### With `light-run` (wraps any command)
@@ -107,7 +109,7 @@ DATA_DIR=./data node server.mjs  # lights saved to ./data/lights.json
 | `DATA_DIR` | `RAILWAY_VOLUME_MOUNT_PATH` | where `lights.json` lives; unset = memory only |
 | `LIGHT_TTL_SECONDS` | `86400` | no report for this long → dark (stale); `0` = never stale |
 
-**Railway:** `railway init --name light-report && railway up`, add a volume mounted at `/data`, set `RAILWAY_RUN_UID=0` if needed, then `railway domain`. The `Dockerfile` sets `DATA_DIR=/data`.
+**Railway:** create a project and service, add a volume mounted at `/data`, set `RAILWAY_RUN_UID=0`, generate a domain (target port 8080), then `railway up` (a project token in `RAILWAY_TOKEN` works for `railway up --ci --service <id>`). The `Dockerfile` sets `DATA_DIR=/data`.
 
 ## License
 
