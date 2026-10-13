@@ -185,13 +185,15 @@ Edit \`queued.json\` to add entries: \`[{"key": "owner/repo#.github/workflows/ci
 // ---------- main ----------
 async function main() {
   const args = process.argv.slice(2);
-  const opt = { dir: '.', maxRepos: 120, issues: true, seeds: [], dry: false };
+  const opt = { dir: '.', maxRepos: 120, issues: true, seeds: [], dry: false, syncOnly: false, only: [] };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--dir') opt.dir = args[++i];
     else if (a === '--max-repos') opt.maxRepos = Number(args[++i]);
     else if (a === '--no-issues') opt.issues = false;
     else if (a === '--seed') opt.seeds.push(args[++i]);
+    else if (a === '--only') opt.only.push(args[++i]);
+    else if (a === '--sync-only') opt.syncOnly = true;
     else if (a === '--dry-run') { opt.dry = true; opt.issues = false; }
     else { console.error(`unknown argument ${a}`); process.exit(2); }
   }
@@ -205,11 +207,11 @@ async function main() {
   // order: open darks first (to catch relit), then seeds, then sources (rotating cursor)
   const open = [...new Set(Object.values(prev.darks || {}).filter((e) => e.light === 'dark').map((e) => e.repo))];
   const seeds = [...seedRepos(opt.seeds).keys()];
-  const srcMap = await candidates(gh);
+  const srcMap = opt.syncOnly || opt.only.length ? new Map() : await candidates(gh);
   const src = [...srcMap.keys()];
   const cursor = (prev.cursor || 0) % Math.max(1, src.length);
   const rotated = src.slice(cursor).concat(src.slice(0, cursor));
-  const order = [...new Set([...open, ...seeds, ...rotated])].slice(0, opt.maxRepos);
+  const order = opt.only.length ? opt.only : opt.syncOnly ? [] : [...new Set([...open, ...seeds, ...rotated])].slice(0, opt.maxRepos);
   console.error(`dark-crawl: ${order.length} repos (open darks ${open.length}, seeds ${seeds.length}, sources ${src.length})`);
 
   const scanned = new Map();
@@ -219,12 +221,13 @@ async function main() {
     catch (e) { if (e.budget) { stopped = e.message; break; } console.error(`  ${repo}: ${e.message}`); }
   }
   const state = mergeState(prev, scanned, { overrides, queued });
-  state.cursor = (cursor + Math.max(0, done - open.length - seeds.length)) % Math.max(1, src.length);
-  state.lastCrawl = { at: new Date().toISOString(), scanned: done, darkLights: [...scanned.values()].reduce((n, r) => n + r.lights.filter((l) => l.light === 'dark').length, 0), litLights: [...scanned.values()].reduce((n, r) => n + r.lights.filter((l) => l.light === 'lit').length, 0), apiCalls: gh.st.calls, stopped };
+  if (opt.syncOnly || opt.only.length) { state.cursor = prev.cursor || 0; state.lastCrawl = prev.lastCrawl; }
+  else state.cursor = (cursor + Math.max(0, done - open.length - seeds.length)) % Math.max(1, src.length);
+  if (!opt.syncOnly && !opt.only.length) state.lastCrawl = { at: new Date().toISOString(), scanned: done, darkLights: [...scanned.values()].reduce((n, r) => n + r.lights.filter((l) => l.light === 'dark').length, 0), litLights: [...scanned.values()].reduce((n, r) => n + r.lights.filter((l) => l.light === 'lit').length, 0), apiCalls: gh.st.calls, stopped };
   state.queued = queued;
   let counts = null;
   if (opt.issues) counts = await syncIssues(gh, state);
-  state.lastCrawl.issues = counts;
+  if (state.lastCrawl) state.lastCrawl.issues = counts;
   if (!opt.dry) {
     writeFileSync(join(dir, 'darks.json'), JSON.stringify(state, null, 2) + '\n');
     writeFileSync(join(dir, 'QUEUE.md'), queueMarkdown(queued, state));
