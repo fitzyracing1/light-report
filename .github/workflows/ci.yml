@@ -22,4 +22,8 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - run: curl -fsS -X POST https://light-report-production.up.railway.app/runs -H 'Content-Type: application/json' -d '{"repo":"${{ github.repository }}"}' || echo "runner did not take the job (busy or rate limited)"
+      - name: queue a runner check
+        run: |
+          curl -fsS -X POST https://light-report-production.up.railway.app/runs \
+            -H 'Content-Type: application/json' \
+            -d '{"repo":"${{ github.repository }}"}' || echo "runner did not take the job (busy or rate limited)"
