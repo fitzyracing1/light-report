@@ -8,6 +8,7 @@ import { openStore } from './lib/store.mjs';
 import { readGitHubLight } from './lib/github.mjs';
 import { createRunner } from './lib/runner.mjs';
 import { siteHtml } from './lib/site.mjs';
+import { createDarksSource, darksJson, darksHtml } from './lib/darks-board.mjs';
 
 export function createApp({
   dataDir = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH,
@@ -15,6 +16,7 @@ export function createApp({
   github = readGitHubLight,
   runnerOptions = {},
   runsPerHour = Number(process.env.RUNS_PER_IP_PER_HOUR ?? 6),
+  darksSource = createDarksSource(),
 } = {}) {
   const store = openStore(dataDir);
   const ttlMs = ttlSeconds * 1000;
@@ -117,6 +119,8 @@ export function createApp({
         const lights = Object.keys(store.all()).sort().map((n) => view(n, store.get(n), ttlMs));
         return send(res, 200, siteHtml({ base, ttlSeconds, lights }), 'text/html; charset=utf-8');
       }
+      if (req.method === 'GET' && url.pathname === '/darks.json') return send(res, 200, darksJson(await darksSource.load()));
+      if (req.method === 'GET' && (url.pathname === '/darks' || url.pathname === '/darks/')) return send(res, 200, darksHtml(await darksSource.load()), 'text/html; charset=utf-8');
       if (req.method === 'GET' && url.pathname === '/board') return send(res, 200, board(), 'text/html; charset=utf-8');
       if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true, persistent: store.persistent(), ttlSeconds });
       if (req.method === 'GET' && url.pathname === '/lights') {
