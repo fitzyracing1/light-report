@@ -5,14 +5,58 @@ import { fileURLToPath } from 'node:url';
 import { NAME_RE, toLight, toBit, newToken, hashToken, tokenMatches, view, badgeSvg } from './lib/lights.mjs';
 import { openStore } from './lib/store.mjs';
 import { readGitHubLight } from './lib/github.mjs';
+import { createRunner } from './lib/runner.mjs';
 
 export function createApp({
   dataDir = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH,
   ttlSeconds = Number(process.env.LIGHT_TTL_SECONDS ?? 86400),
   github = readGitHubLight,
+  runnerOptions = {},
+  runsPerHour = Number(process.env.RUNS_PER_IP_PER_HOUR ?? 6),
 } = {}) {
   const store = openStore(dataDir);
   const ttlMs = ttlSeconds * 1000;
+
+  // Runner results become lights named owner--repo, source 'light-report-runner'.
+  // An existing light keeps its write token hash; a runner-created light has none (only the runner writes it).
+  const runner = createRunner({
+    ...runnerOptions,
+    onResult(run) {
+      const name = run.repo.replace('/', '--');
+      const existing = store.get(name);
+      store.set(name, {
+        tokenHash: existing?.tokenHash ?? null,
+        light: run.light,
+        source: 'light-report-runner',
+        detail: `run ${run.id}: ${run.command || run.error || ''} → exit ${run.exitCode}${run.timedOut ? ' (timeout)' : ''}`.slice(0, 500),
+        reportedAt: run.finishedAt,
+      });
+    },
+  });
+
+  // per-IP rate limit for POST /runs (sliding hour)
+  const hits = new Map();
+  function allowRun(req) {
+    if (!runsPerHour) return true;
+    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim();
+    const now = Date.now();
+    const list = (hits.get(ip) || []).filter((t) => now - t < 3600_000);
+    if (list.length >= runsPerHour) { hits.set(ip, list); return false; }
+    list.push(now); hits.set(ip, list);
+    return true;
+  }
+
+  function streamLog(req, res, run) {
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+    for (const c of run.log) res.write(c);
+    if (run.status === 'done') return res.end();
+    const onData = (c) => res.write(c);
+    const onDone = () => { cleanup(); res.end(); };
+    const cleanup = () => { run.events.off('data', onData); run.events.off('done', onDone); };
+    run.events.on('data', onData);
+    run.events.on('done', onDone);
+    req.on('close', cleanup);
+  }
 
   const send = (res, code, body, type = 'application/json; charset=utf-8', extra = {}) => {
     res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-cache, max-age=0', ...extra });
@@ -59,10 +103,10 @@ export function createApp({
 <style>body{font:15px system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}table{border-collapse:collapse;width:100%}td,th{padding:.4em;border-bottom:1px solid #ddd;text-align:left}.lamp{font-size:1.4em}.lit .lamp{color:#f2b705}.dark .lamp{color:#333}</style></head>
 <body><h1>light-report</h1><p>Each light is one bit: <b>lit</b> = 0, <b>dark</b> = 1. No report within ${ttlSeconds}s means dark.</p>
 <table><tr><th></th><th>name</th><th>light</th><th>bit</th><th>source</th><th>reported</th></tr>${tr || '<tr><td colspan="6">No lights reported yet.</td></tr>'}</table>
-<p><a href="https://github.com/fitzyracing1/light-report">github.com/fitzyracing1/light-report</a></p></body></html>`;
+<p>Recent runs: <a href="/runs">/runs</a> · github.com/fitzyracing1/light-report</a></p></body></html>`;
   }
 
-  return createServer(async (req, res) => {
+  const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://x');
       const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
@@ -70,6 +114,20 @@ export function createApp({
       if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true, persistent: store.persistent(), ttlSeconds });
       if (req.method === 'GET' && url.pathname === '/lights') {
         return send(res, 200, Object.keys(store.all()).sort().map((n) => view(n, store.get(n), ttlMs)));
+      }
+      if (parts[0] === 'runs') {
+        if (req.method === 'POST' && parts.length === 1) {
+          const body = await readBody(req);
+          if (!allowRun(req)) return send(res, 429, { error: `rate limit: ${runsPerHour} runs per hour per IP` });
+          const run = runner.submit(body);
+          return send(res, 202, { ...runner.view(run), url: `/runs/${run.id}`, log: `/runs/${run.id}/log` });
+        }
+        if (req.method === 'GET' && parts.length === 1) return send(res, 200, runner.list());
+        const run = parts[1] && runner.get(parts[1]);
+        if (!run) return send(res, 404, { error: 'no such run' });
+        if (req.method === 'GET' && parts.length === 2) return send(res, 200, runner.view(run));
+        if (req.method === 'GET' && parts.length === 3 && parts[2] === 'log') return streamLog(req, res, run);
+        return send(res, 404, { error: 'not found' });
       }
       if (parts[0] !== 'lights' || parts.length < 2 || parts.length > 3) return send(res, 404, { error: 'not found' });
       const name = parts[1];
@@ -100,6 +158,9 @@ export function createApp({
       send(res, e.code >= 400 && e.code < 600 ? e.code : 500, { error: e.message });
     }
   });
+  server.runner = runner;
+  server.on('close', () => runner.stop());
+  return server;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

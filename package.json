@@ -1,14 +1,28 @@
 {
   "name": "light-report",
   "version": "0.1.0",
-  "description": "Report CI lights (lit = 0, dark = 1) from any source: shells, cron, Jenkins, GitLab, health checks, GitHub.",
+  "description": "Report and run CI lights (lit = 0, dark = 1) from any source: shells, cron, Jenkins, GitLab, health checks, GitHub, or its own runner.",
   "type": "module",
   "license": "MIT",
   "author": "Joshua Almeida",
   "repository": "github:fitzyracing1/light-report",
-  "bin": { "light-run": "bin/light-run.mjs" },
+  "bin": {
+    "light-run": "bin/light-run.mjs",
+    "light-check": "bin/light-check.mjs"
+  },
   "main": "lib/lights.mjs",
-  "files": ["bin", "lib", "server.mjs", "README.md", "LICENSE"],
-  "engines": { "node": ">=18" },
-  "scripts": { "start": "node server.mjs", "test": "node --test test/lights.test.mjs test/server.test.mjs" }
+  "files": [
+    "bin",
+    "lib",
+    "server.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/lights.test.mjs test/server.test.mjs test/runner.test.mjs"
+  }
 }
