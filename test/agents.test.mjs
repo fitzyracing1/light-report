@@ -61,6 +61,14 @@ test('light-check . uploads and runs on the server: lit and dark', async () => {
   assert.equal(r.status, 1); assert.match(r.err, /○ dark/);
   const l = await (await fetch(`${base}/lights/up-dark`)).json();
   assert.deepEqual([l.light, l.source], ['dark', 'light-report-runner (upload)']);
+  // same name again from the same machine: saved token is used; --local report to it works too
+  r = await cli([dark, '--name', 'up-dark', '--local', '--cmd', 'true']);
+  assert.equal(r.status, 0); assert.doesNotMatch(r.err, /not reported/);
+  assert.equal(await (await fetch(`${base}/lights/up-dark/LIGHT`)).text(), 'lit\n');
+  // someone without the token can't overwrite it
+  const { gzipSync } = await import('node:zlib');
+  const res = await fetch(`${base}/runs/upload`, { method: 'POST', body: gzipSync(JSON.stringify({ name: 'up-dark', files: [{ path: 'a', data: '' }] })) });
+  assert.equal(res.status, 401);
 });
 test('light-check --local runs here and reports, token reused', async () => {
   const lit = folder({ 'package.json': '{"scripts":{"test":"node -e 0"}}' });

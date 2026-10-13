@@ -27,7 +27,7 @@ export function createApp({
       const name = run.lightName;
       const existing = store.get(name);
       store.set(name, {
-        tokenHash: existing?.tokenHash ?? null,
+        tokenHash: existing?.tokenHash ?? run.tokenHash ?? null,
         light: run.light,
         source: run.upload ? 'light-report-runner (upload)' : 'light-report-runner',
         detail: `run ${run.id}: ${run.command || run.error || ''} → exit ${run.exitCode}${run.timedOut ? ' (timeout)' : ''}`.slice(0, 500),
@@ -141,9 +141,22 @@ export function createApp({
           } catch (e) { return send(res, 400, { error: `upload must be gzip'd JSON: ${e.message}` }); }
           const bytes = (body.files || []).reduce((n, f) => n + Math.floor(String(f.data || '').length * 3 / 4), 0);
           if (bytes > 20 * 1024 * 1024) return send(res, 413, { error: 'upload over 20 MB of files' });
+          // The light of an upload belongs to whoever holds its write token.
+          const lname = String(body.name || '');
+          if (!NAME_RE.test(lname)) return send(res, 400, { error: 'name: letters, digits, . _ - (max 100)' });
+          const existing = store.get(lname);
+          const auth = req.headers.authorization || '';
+          const given = auth.startsWith('Bearer ') ? auth.slice(7).trim() : req.headers['x-light-token'];
+          let newTok = null;
+          if (existing?.tokenHash) {
+            if (!tokenMatches(given, existing.tokenHash)) return send(res, 401, { error: 'write token missing or wrong for this light' });
+          } else if (existing && existing.source === 'light-report-runner') {
+            return send(res, 409, { error: 'that name belongs to a repo run; pick another --name' });
+          } else newTok = newToken();
           if (!allowRun(req)) return send(res, 429, { error: `rate limit: ${runsPerHour} runs per hour per IP` });
-          const run = runner.submit({ files: body.files, name: body.name, command: body.command || undefined });
-          return send(res, 202, { ...runner.view(run), url: `/runs/${run.id}`, log: `/runs/${run.id}/log` });
+          const run = runner.submit({ files: body.files, name: lname, command: body.command || undefined });
+          if (newTok) run.tokenHash = hashToken(newTok);
+          return send(res, 202, { ...runner.view(run), url: `/runs/${run.id}`, log: `/runs/${run.id}/log`, ...(newTok ? { token: newTok } : {}) });
         }
         if (req.method === 'GET' && parts.length === 1) return send(res, 200, runner.list());
         const run = parts[1] && runner.get(parts[1]);

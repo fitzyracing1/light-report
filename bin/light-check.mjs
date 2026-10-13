@@ -11,7 +11,7 @@ import { existsSync, statSync, readFileSync, writeFileSync, mkdirSync } from 'no
 import { resolve, join } from 'node:path';
 import { tmpdir, hostname } from 'node:os';
 import { readGitHubLight } from '../lib/github.mjs';
-import { DEFAULT_URL, packDir, localLightName, reportLight, runLocal } from '../lib/local.mjs';
+import { DEFAULT_URL, packDir, localLightName, reportLight, runLocal, loadToken, saveToken } from '../lib/local.mjs';
 import { init } from '../lib/init.mjs';
 import { gzipSync } from 'node:zlib';
 
@@ -157,7 +157,10 @@ try {
   const pack = packDir(dir);
   status(`light-check: uploading ${pack.files.length} files (${(pack.total / 1024).toFixed(0)} KB) as light "${name}"\n`);
   const gz = gzipSync(Buffer.from(JSON.stringify({ name, command: opt.cmd || undefined, files: pack.files })));
-  const run = await submit('/runs/upload', gz, { 'Content-Type': 'application/gzip' });
+  const envKey = 'LIGHT_TOKEN_' + name.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  const tok = process.env[envKey] || process.env.LIGHT_TOKEN || loadToken(base, name);
+  const run = await submit('/runs/upload', gz, { 'Content-Type': 'application/gzip', ...(tok ? { Authorization: `Bearer ${tok}` } : {}) });
+  if (run.token) { try { saveToken(base, name, run.token); status(`light-check: new write token for "${name}" saved to ~/.config/light-report/tokens.json\n`); } catch {} }
   await streamRun(run, `${name} (upload)`);
 } catch (e) {
   console.error(`light-check: ${e.message}`);
