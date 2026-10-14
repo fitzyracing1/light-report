@@ -5,6 +5,9 @@
 //   light-check [path] [--name n] [--cmd '...']      upload the working tree (default path: .) and run it on the server
 //   light-check [path] --local [--no-report]          run the detected command here, report the light (nothing uploaded)
 //   light-check init [--post-edit] [--pre-push] [--folder-open]   add Claude Code / VS Code / Cursor / git integration
+//   light-check trial owner/repo --merge <branch|pr:N> [--site s] [--live url]   trial copy + light + preview
+//   light-check flip <site> <trial-id|live> [--force]                           move the stable URL
+//   light-check site <site>                                                     show a site's target and trials
 //   light-check --hook claude-stop|claude-post-edit  used by Claude Code hooks
 // Exit: 0 lit, 1 dark, 2 usage or transport error (that is not a light).
 import { existsSync, statSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -16,6 +19,10 @@ import { init } from '../lib/init.mjs';
 import { gzipSync } from 'node:zlib';
 
 const argv = process.argv.slice(2);
+if (['trial', 'flip', 'site'].includes(argv[0])) {
+  const { trialCli } = await import('../lib/trial-cli.mjs');
+  process.exit(await trialCli(argv));
+}
 const opt = { target: null, ref: null, cmd: null, name: null, github: false, local: false, report: true, hook: null, postEdit: false, prePush: false, folderOpen: false };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -40,6 +47,9 @@ function usage(code) {
   light-check [path] [--name light-name] [--cmd '...']                  upload a local folder (default .) and run it on the server
   light-check [path] --local [--no-report]                              run it here, nothing uploaded
   light-check init [--post-edit] [--pre-push] [--folder-open]           add agent integration to this repo
+  light-check trial owner/repo --merge <branch|pr:N> [--site s]         trial copy with the merge, its light, a preview
+  light-check flip <site> <trial-id|live> [--force]                     point the stable URL at a copy (dark refused)
+  light-check site <site>                                               show where the stable URL points
 exit: 0 lit, 1 dark, 2 error`);
   process.exit(code);
 }

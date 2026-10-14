@@ -130,6 +130,30 @@ curl -s https://light-report-production.up.railway.app/lights/deploy/LIGHT     #
 curl -s https://light-report-production.up.railway.app/lights/deploy           # {"name","light","bit","source","reportedAt","stale"}
 ```
 
+## Trials: merge a branch into a copy, flip one stable URL
+
+`light-check trial` duplicates a repo with a branch (or same-repo PR) merged in, lights the copy with the runner,
+and deploys it as its own preview. The **light-site** router keeps one stable URL on the live copy; flip it to the
+trial when the trial is **lit**, flip back any time (instant rollback — the live copy keeps running).
+
+```sh
+light-check trial fitzyracing1/light-report --merge my-branch   # or --merge pr:12
+light-check flip light-report <trial-id>       # 409 / exit 1 while the trial is dark; --force overrides
+light-check flip light-report live             # rollback
+light-check site light-report                  # target, live URL, trials
+```
+
+- Stable URL: https://light-site-production.up.railway.app (proxies to the current copy of `light-report`).
+- Router API: `GET /sites/:name` public; `PUT /sites/:name`, `POST /sites/:name/trials`, `DELETE /sites/:name/trials/:id`,
+  `POST /sites/:name/flip {"to":"<id>|live","force":false}` need `Authorization: Bearer $LIGHT_SITE_ADMIN_TOKEN`.
+- Trial lights are `<owner>--<repo>--trial-<id>` and never overwrite the repo's own light.
+- Cap: 2 trials per site; a new trial cleans up the oldest one that isn't the target (Railway service, `trial/<id>` branch, router entry).
+- v1 is for your own repos: it needs `gh` (repo owner = your login), `RAILWAY_API_TOKEN` (create services/domains),
+  `RAILWAY_TOKEN` (project token, deploy), `LIGHT_TRIAL_PROJECT_ID`, `LIGHT_TRIAL_ENVIRONMENT_ID`, `LIGHT_SITE_ADMIN_TOKEN`.
+- Run the router yourself: `node bin/light-site.mjs` (or `Dockerfile.site`) with `LIGHT_SITE_ADMIN_TOKEN`,
+  `LIGHT_SITE_SEED_LIVE=<live url>`, `DATA_DIR`.
+- Design, data model, security and what a multi-tenant version needs: [docs/TRIALS.md](docs/TRIALS.md).
+
 ## API
 
 | | |
