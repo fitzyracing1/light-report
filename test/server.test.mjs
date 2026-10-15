@@ -44,9 +44,14 @@ test('first report creates light and returns token once; token required after', 
   assert.doesNotMatch(home, /\b(green|red|pass|passed|fail|failed|failure)\b/i);
   assert.match(await (await fetch(base + '/board')).text(), /build/);
 });
-test('unknown light is dark and stale', async () => {
-  const g = await (await fetch(base + '/lights/never')).json();
-  assert.deepEqual([g.light, g.bit, g.stale], ['dark', 1, true]);
+test('unknown light has no light (404), not dark', async () => {
+  const res = await fetch(base + '/lights/never');
+  assert.equal(res.status, 404);
+  const g = await res.json();
+  assert.deepEqual([g.light, g.bit, g.stale], [null, null, false]);
+  const l = await fetch(base + '/lights/never/LIGHT');
+  assert.equal(l.status, 404);
+  assert.match(await (await fetch(base + '/lights/never/badge.svg')).text(), /no light/);
 });
 test('state reports and bad input', async () => {
   assert.equal((await (await post('/lights/s1', { state: 'lit', source: 'x' })).json()).light, 'lit');

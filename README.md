@@ -56,6 +56,7 @@ Full steps: [site → AI agents](https://light-report-production.up.railway.app/
 |---|---|---|
 | **lit** ● | `0` | exit code 0, `state: "lit"`, or GitHub conclusion `success` |
 | **dark** ○ | `1` | anything else — nonzero exit, cancelled, timeout — or **no report within the TTL** (stale) |
+| no light | — | a name that was **never reported** (HTTP 404, badge says "no light"), or a report with no exit code / state, or an unknown word like `passed` (HTTP 400). No data is an error, never dark. |
 
 Active-low, exactly as in the [lit-dark spec](https://github.com/fitzyracing1/lit-dark/blob/main/SPEC.md). More: [site → lit & dark](https://light-report-production.up.railway.app/#lights).
 

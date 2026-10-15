@@ -3,7 +3,10 @@ FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates python3 python3-venv python3-pip make \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY package.json server.mjs ./
+COPY package.json package-lock.json ./
+# @fitzyracing1/light-core comes from git (pinned tag), so git must be installed before this step
+RUN npm ci --omit=dev --no-audit --no-fund
+COPY server.mjs ./
 COPY lib/ ./lib/
 COPY bin/ ./bin/
 # server runs as root (to own the /data volume); runner jobs drop to uid 1000 ("node")

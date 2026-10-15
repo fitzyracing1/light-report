@@ -6,25 +6,24 @@ import { readGitHubLight } from '../lib/github.mjs';
 test('exit code 0 is lit, anything else is dark', () => {
   assert.equal(toLight({ exitCode: 0 }), 'lit');
   assert.equal(toLight({ exitCode: '0' }), 'lit');
-  for (const c of [1, 2, 127, -1, 'x', ' ']) assert.equal(toLight({ exitCode: c }), 'dark');
+  for (const c of [1, 2, 127, -1, '1']) assert.equal(toLight({ exitCode: c }), 'dark');
 });
-test('state lit / github success is lit; others dark; nothing is dark', () => {
+test('state lit / github success is lit; other conclusions dark', () => {
   assert.equal(toLight({ state: 'lit' }), 'lit');
   assert.equal(toLight({ state: 'success' }), 'lit');
-  for (const s of ['dark', 'failure', 'cancelled', 'timed_out', 'skipped', '']) assert.equal(toLight({ state: s }), 'dark');
-  assert.equal(toLight({}), 'dark');
+  for (const s of ['dark', 'failure', 'cancelled', 'timed_out', 'skipped', 'neutral']) assert.equal(toLight({ state: s }), 'dark');
 });
 test('active-low bit and byte', () => {
   assert.equal(toBit('lit'), 0);
   assert.equal(toBit('dark'), 1);
   assert.equal(lightsToByte(['lit','lit','lit','lit','dark','dark','lit','lit']), 12);
 });
-test('stale lights are dark', () => {
+test('stale lights are dark; never-reported has no light', () => {
   const rec = { light: 'lit', source: 's', reportedAt: new Date(Date.now() - 10_000).toISOString() };
   assert.equal(view('a', rec, 60_000).light, 'lit');
   const v = view('a', rec, 5_000);
   assert.deepEqual([v.light, v.bit, v.stale], ['dark', 1, true]);
-  assert.equal(view('none', undefined, 5_000).light, 'dark');
+  assert.equal(view('none', undefined, 5_000).light, null);
 });
 test('token hashing', () => {
   const h = hashToken('abc');
