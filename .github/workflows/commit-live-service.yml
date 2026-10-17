@@ -1,0 +1,118 @@
+# commit-live service launcher (throwaway trial on try/service-launch).
+# DRY RUN ONLY: in-memory GitHub + mock host. No secrets, no deployments written, nothing launched,
+# Railway is never called (host is hard-wired to mock and COMMIT_LIVE_REAL is false).
+# Spec: https://github.com/fitzyracing1/commit-live/blob/try/service-launch/SERVICES.md
+name: commit-live service
+
+on:
+  push:
+    branches: ['try/**']
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full 40-char sha to make live (dry run). Empty = the selected branch head.
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  COMMIT_LIVE_REF: try/service-launch
+  COMMIT_LIVE_REAL: 'false'
+
+jobs:
+  launch:
+    name: launch preview (dry run, mock host)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: wait for and read this commit's light
+        id: light
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          # lit = every other GitHub Actions run on this sha concluded success; dark = anything else.
+          self=".github/workflows/commit-live-service.yml"
+          for i in $(seq 1 210); do
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SHA&per_page=100" \
+              --jq "[.workflow_runs[] | select(.path != \"$self\")]")
+            n=$(jq length <<<"$runs"); open=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
+            if [ "$n" -gt 0 ] && [ "$open" -eq 0 ]; then break; fi
+            sleep 10
+          done
+          jq -r '.[] | "  \(.name): \(.status)/\(.conclusion)"' <<<"$runs"
+          ok=$(jq '[.[] | select(.conclusion == "success")] | length' <<<"$runs")
+          if [ "$n" -gt 0 ] && [ "$open" -eq 0 ] && [ "$ok" -eq "$n" ]; then light=lit; else light=dark; fi
+          echo "light=$light" >> "$GITHUB_OUTPUT"
+          echo "commit-live: $SHA is $light ($ok/$n runs success)"
+      - uses: actions/checkout@v4
+        with:
+          repository: fitzyracing1/commit-live
+          ref: ${{ env.COMMIT_LIVE_REF }}
+          path: .commit-live
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+        working-directory: .commit-live
+      - name: launch (dry run, mock host)
+        env:
+          LIGHT: ${{ steps.light.outputs.light }}
+          SHA: ${{ github.sha }}
+        run: |
+          set +e
+          node .commit-live/src/services/cli.mjs launch --dry-run --host mock --sha "$SHA" --light "$LIGHT"
+          rc=$?
+          set -e
+          if [ "$LIGHT" = lit ] && [ $rc -eq 0 ]; then r="launched (dry run, mock)"
+          elif [ "$LIGHT" = dark ] && [ $rc -eq 1 ]; then r="refused: dark commit (dry run, mock)"
+          else echo "::error::unexpected launcher exit $rc for a $LIGHT commit"; exit 2; fi
+          echo "::notice title=commit-live dry run::$LIGHT -> $r"
+          echo "commit-live dry run: **$LIGHT** -> $r" >> "$GITHUB_STEP_SUMMARY"
+      - name: teardown (dry run, mock host)
+        run: node .commit-live/src/services/cli.mjs teardown --dry-run --host mock --keep 3
+
+  go-live:
+    name: go live (human press, dry run, mock host)
+    # Only a person pressing "Run workflow" counts; the launcher refuses pushes, schedules and bots as well.
+    if: github.event_name == 'workflow_dispatch' && !endsWith(github.actor, '[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: read the light of the chosen sha
+        id: light
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_SHA: ${{ inputs.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          sha="${INPUT_SHA:-$HEAD_SHA}"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be a full 40-char sha"; exit 1; }
+          self=".github/workflows/commit-live-service.yml"
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$sha&per_page=100" \
+            --jq "[.workflow_runs[] | select(.path != \"$self\" and .event != \"workflow_dispatch\")]")
+          n=$(jq length <<<"$runs"); ok=$(jq '[.[] | select(.conclusion == "success")] | length' <<<"$runs")
+          if [ "$n" -gt 0 ] && [ "$ok" -eq "$n" ]; then light=lit; else light=dark; fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"; echo "light=$light" >> "$GITHUB_OUTPUT"
+          echo "commit-live: $sha is $light"
+      - uses: actions/checkout@v4
+        with:
+          repository: fitzyracing1/commit-live
+          ref: ${{ env.COMMIT_LIVE_REF }}
+          path: .commit-live
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+        working-directory: .commit-live
+      - name: go live (dry run, mock host)
+        env:
+          SHA: ${{ steps.light.outputs.sha }}
+          LIGHT: ${{ steps.light.outputs.light }}
+        run: node .commit-live/src/services/cli.mjs go-live --dry-run --host mock --sha "$SHA" --light "$LIGHT"
