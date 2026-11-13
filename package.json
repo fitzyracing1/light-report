@@ -23,6 +23,9 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test test/lights.test.mjs test/server.test.mjs test/runner.test.mjs test/agents.test.mjs test/darks.test.mjs test/trials.test.mjs"
+    "test": "node --test test/lights.test.mjs test/server.test.mjs test/runner.test.mjs test/agents.test.mjs test/darks.test.mjs test/trials.test.mjs test/light-core.test.mjs"
+  },
+  "dependencies": {
+    "@fitzyracing1/light-core": "git+https://github.com/fitzyracing1/light-core.git#v0.1.0"
   }
 }

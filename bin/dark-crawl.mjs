@@ -8,41 +8,29 @@
 //   GITHUB_TOKEN=... node bin/dark-crawl.mjs [--dir .] [--max-repos 120] [--no-issues] [--seed file ...] [--dry-run]
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { lightsForRepo, pickCause, classify, mergeState, issueTitle, issueBody, labelsFor, keyOf } from '../lib/darks.mjs';
+import { createGitHub as coreGitHub, readRepoLights } from '@fitzyracing1/light-core';
+import { pickCause, classify, mergeState, issueTitle, issueBody, labelsFor, keyOf } from '../lib/darks.mjs';
 
 export const DARKS_REPO = process.env.DARKS_REPO || 'fitzyracing1/darks';
-const API = 'https://api.github.com';
 
-export function createGitHub({ token = process.env.GITHUB_TOKEN, fetchImpl = fetch, floor = 60, log = console.error } = {}) {
-  const st = { remaining: Infinity, reset: 0, calls: 0, searchCalls: 0 };
-  async function call(method, path, body) {
-    if (st.remaining < floor) throw Object.assign(new Error(`rate budget low (${st.remaining} left)`), { budget: true });
-    for (let attempt = 0; attempt < 3; attempt++) {
-      st.calls++;
-      if (path.startsWith('/search/')) { st.searchCalls++; await new Promise((r) => setTimeout(r, 2200)); } // search: 30/min
-      const res = await fetchImpl(API + path, {
-        method, body: body ? JSON.stringify(body) : undefined,
-        headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'dark-crawler', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
-      });
-      const rem = res.headers.get?.('x-ratelimit-remaining');
-      if (rem != null && !path.startsWith('/search/')) { st.remaining = Number(rem); st.reset = Number(res.headers.get('x-ratelimit-reset')) * 1000; }
-      if ((res.status === 403 || res.status === 429) && res.headers.get?.('retry-after')) {
-        const wait = Math.min(120, Number(res.headers.get('retry-after'))) * 1000; log(`secondary rate limit, waiting ${wait / 1000}s`); await new Promise((r) => setTimeout(r, wait)); continue;
-      }
-      if (res.status === 403 && rem === '0') throw Object.assign(new Error('rate limit reached'), { budget: true });
-      if (res.status === 204) return null;
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw Object.assign(new Error(`${method} ${path}: HTTP ${res.status} ${data?.message || ''}`), { status: res.status });
-      return data;
-    }
-    throw new Error(`${method} ${path}: gave up after retries`);
+/**
+ * light-core's client (403/429 retry-after, x-ratelimit-reset backoff, budget floor) with dark-crawl's
+ * search pacing on top. Writes only go through ownRepoWrite → light-core write() with writeRepos: [DARKS_REPO].
+ */
+export function createGitHub({ token = process.env.GITHUB_TOKEN, fetchImpl = fetch, floor = 60, log = console.error, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  const core = coreGitHub({ token, fetch: (...a) => fetchImpl(...a), userAgent: 'dark-crawler', floor, log, sleep, writeRepos: [DARKS_REPO] });
+  const st = {
+    searchCalls: 0,
+    get calls() { return core.rate.calls; },
+    get remaining() { return core.rate.remaining; },
+    get reset() { return core.rate.resetAt; },
+  };
+  async function get(path) {
+    if (path.startsWith('/search/')) { st.searchCalls++; await sleep(2200); } // search: 30/min
+    return core.get(path);
   }
-  const get = (p) => call('GET', p);
   // The only door to writes. Refuses anything outside DARKS_REPO.
-  function ownRepoWrite(method, path, body) {
-    if (!path.startsWith(`/repos/${DARKS_REPO}/`)) throw new Error(`refusing to write outside ${DARKS_REPO}: ${method} ${path}`);
-    return call(method, path, body);
-  }
+  const ownRepoWrite = (method, path, body) => core.write(method, path, body);
   return { get, ownRepoWrite, st };
 }
 
@@ -99,24 +87,12 @@ export function seedRepos(files) {
 
 // ---------- scanning ----------
 export async function scanRepo(gh, repo, { now = Date.now() } = {}) {
-  const meta = await gh.get(`/repos/${repo}`);
-  if (meta.archived || meta.disabled) return { stars: meta.stargazers_count, lights: [], skipped: 'archived' };
-  const branch = meta.default_branch;
-  const wf = await gh.get(`/repos/${repo}/actions/workflows?per_page=100`);
-  if (!wf.workflows?.length) return { stars: meta.stargazers_count, lights: [] };
-  let files = new Set();
-  try {
-    const dir = await gh.get(`/repos/${repo}/contents/.github/workflows?ref=${encodeURIComponent(branch)}`);
-    for (const f of dir || []) files.add(f.path);
-  } catch (e) { if (e.status !== 404) throw e; }
-  const since = new Date(now - 30 * 86400_000).toISOString().slice(0, 19) + 'Z';
-  let runs = [];
-  for (let page = 1; page <= 3; page++) {
-    const j = await gh.get(`/repos/${repo}/actions/runs?branch=${encodeURIComponent(branch)}&status=completed&per_page=100&page=${page}&created=${encodeURIComponent('>=' + since)}&exclude_pull_requests=true`);
-    runs = runs.concat(j.workflow_runs || []);
-    if ((j.workflow_runs || []).length < 100) break;
-  }
-  const lights = lightsForRepo({ workflows: wf.workflows, files, runs, branch, now });
+  // readRepoLights reads /repos/{repo} too; share the one response so stars cost no extra call.
+  const metaPath = `/repos/${repo}`;
+  const meta = await gh.get(metaPath);
+  const read = await readRepoLights({ ...gh, get: (p) => (p === metaPath ? meta : gh.get(p)) }, repo, { now });
+  if (read.skipped) return { stars: meta.stargazers_count, lights: [], skipped: read.skipped };
+  const lights = read.lights;
   for (const l of lights) {
     if (l.light !== 'dark') continue;
     try {
@@ -126,7 +102,7 @@ export async function scanRepo(gh, repo, { now = Date.now() } = {}) {
       const annotations = job ? await gh.get(`/repos/${repo}/check-runs/${job.id}/annotations?per_page=50`).catch(() => []) : [];
       l.cause = pickCause({ annotations, failedJob: job?.name, failedStep: step?.name, conclusion: l.conclusion });
     } catch (e) { if (e.budget) throw e; l.cause = `cause not readable (${e.message.slice(0, 80)})`; }
-    l.class = classify({ cause: l.cause, conclusion: l.conclusion, streak: l.streak, prevLit: l.prevLit });
+    l.class = classify({ cause: l.cause, conclusion: l.conclusion, streak: l.darkRuns, prevLit: l.lastLitAt !== null });
   }
   return { stars: meta.stargazers_count, lights };
 }

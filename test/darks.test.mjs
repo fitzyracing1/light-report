@@ -35,7 +35,7 @@ test('strict rule per workflow', () => {
   const ls = lightsForRepo({ workflows: W, files, runs, branch: 'main', now });
   assert.deepEqual(ls.map((l) => [l.workflow, l.light]).sort(), [['CI', 'dark'], ['Nightly', 'lit']]);
   const ci = ls.find((l) => l.workflow === 'CI');
-  assert.equal(ci.darkSince, ago(2)); assert.equal(ci.streak, 2); assert.ok(ci.prevLit);
+  assert.equal(ci.darkSince, ago(2)); assert.equal(ci.darkRuns, 2); assert.ok(ci.lastLitAt !== null);
   assert.equal(lightsForRepo({ workflows: W, files, runs: [run(1, 1, 'cancelled', 1)], branch: 'main', now })[0].light, 'dark');
   assert.equal(lightsForRepo({ workflows: W, files, runs: [run(1, 1, 'failure', 31)], branch: 'main', now }).length, 0);
   assert.ok(isIgnoredWorkflow({ name: 'Dependabot Updates', path: 'dynamic/dependabot/dependabot-updates' }));
@@ -50,7 +50,7 @@ test('cause and class', () => {
   assert.equal(classify({ cause: 'Timeout of 2000ms exceeded', conclusion: 'failure' }), 'flaky');
 });
 test('merge: new, override, queue, relit, gone', () => {
-  const lights = (light, d = 1) => [{ workflow: 'CI', path: '.github/workflows/ci.yml', light, darkSince: ago(d), conclusion: light === 'dark' ? 'failure' : 'success', cause: 'boom', class: 'code bug', run: { url: 'u', created_at: ago(0) } }];
+  const lights = (light, d = 1) => [{ workflow: 'CI', path: '.github/workflows/ci.yml', light, darkSince: ago(d), conclusion: light === 'dark' ? 'failure' : 'success', cause: 'boom', class: 'code bug', run: { url: 'u', startedAt: ago(0) } }];
   let s = mergeState({ darks: {} }, new Map([['o/a', { stars: 5, lights: lights('dark') }], ['o/b', { stars: 9, lights: lights('dark') }]]), { now });
   assert.equal(s.darks['o/a#.github/workflows/ci.yml'].status, 'new');
   s = mergeState(s, new Map([['o/a', { stars: 5, lights: lights('dark', 3) }]]), { now, overrides: { 'o/a#.github/workflows/ci.yml': 'fix-trying' }, queued: [{ key: 'o/b#.github/workflows/ci.yml' }] });

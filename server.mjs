@@ -3,7 +3,7 @@
 import { createServer } from 'node:http';
 import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { NAME_RE, toLight, toBit, newToken, hashToken, tokenMatches, view, badgeSvg } from './lib/lights.mjs';
+import { NAME_RE, toLight, toBit, LightError, newToken, hashToken, tokenMatches, view, badgeSvg } from './lib/lights.mjs';
 import { openStore } from './lib/store.mjs';
 import { readGitHubLight } from './lib/github.mjs';
 import { createRunner } from './lib/runner.mjs';
@@ -85,7 +85,11 @@ export function createApp({
     } else {
       token = newToken();
     }
-    const light = toLight(report);
+    let light;
+    try { light = toLight(report); } catch (e) {
+      if (e instanceof LightError) return { code: 400, body: { error: e.message } };
+      throw e;
+    }
     const rec = {
       tokenHash: existing ? existing.tokenHash : hashToken(token),
       light,
@@ -105,7 +109,7 @@ export function createApp({
     const tr = rows.map((v) => `<tr class="${v.light}"><td class="lamp">${v.light === 'lit' ? '●' : '○'}</td><td><a href="/lights/${esc(v.name)}">${esc(v.name)}</a></td><td>${v.light}</td><td>${v.bit}</td><td>${esc(v.source)}</td><td>${esc(v.reportedAt)}${v.stale ? ' (stale)' : ''}</td></tr>`).join('');
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>light-report</title>
 <style>body{font:15px system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}table{border-collapse:collapse;width:100%}td,th{padding:.4em;border-bottom:1px solid #ddd;text-align:left}.lamp{font-size:1.4em}.lit .lamp{color:#f2b705}.dark .lamp{color:#333}</style></head>
-<body><h1>light-report</h1><p>Each light is one bit: <b>lit</b> = 0, <b>dark</b> = 1. No report within ${ttlSeconds}s means dark.</p>
+<body><h1>light-report</h1><p>Each light is one bit: <b>lit</b> = 0, <b>dark</b> = 1. No report within ${ttlSeconds}s means dark (stale); a name never reported has no light.</p>
 <table><tr><th></th><th>name</th><th>light</th><th>bit</th><th>source</th><th>reported</th></tr>${tr || '<tr><td colspan="6">No lights reported yet.</td></tr>'}</table>
 <p><a href="/">Guide</a> · recent runs: <a href="/runs">/runs</a> · <a href="https://github.com/fitzyracing1/light-report">github.com/fitzyracing1/light-report</a></p></body></html>`;
   }
@@ -189,8 +193,9 @@ export function createApp({
       }
       if (req.method === 'GET' || req.method === 'HEAD') {
         const v = view(name, store.get(name), ttlMs);
-        if (!sub) return send(res, 200, v);
-        if (sub === 'LIGHT') return send(res, 200, v.light + '\n', 'text/plain; charset=utf-8');
+        // never reported: no light yet (404), not dark. The badge still renders, as "no light".
+        if (!sub) return send(res, v.light ? 200 : 404, v.light ? v : { ...v, error: 'no light reported yet' });
+        if (sub === 'LIGHT') return v.light ? send(res, 200, v.light + '\n', 'text/plain; charset=utf-8') : send(res, 404, 'no light reported yet\n', 'text/plain; charset=utf-8');
         if (sub === 'badge.svg') return send(res, 200, badgeSvg(name, v.light), 'image/svg+xml');
       }
       return send(res, 404, { error: 'not found' });
