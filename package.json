@@ -24,5 +24,9 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test test/lights.test.mjs test/server.test.mjs test/runner.test.mjs test/agents.test.mjs test/darks.test.mjs test/trials.test.mjs"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/fitzyracing1"
   }
 }
